@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multi-Morpheme Power Writers</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      // Custom Tailwind theme to apply the new design system
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: {
+                DEFAULT: '#6366F1', // indigo-500
+                dark: '#4F46E5', // indigo-600
+              },
+              secondary: '#64748B', // slate-500
+              accent: {
+                sky: '#0EA5E9',
+                emerald: '#10B981',
+                amber: '#F59E0B',
+                fuchsia: '#D946EF',
+                rose: '#F43F5E',
+              },
+              neutral: {
+                 50: '#F8FAFC',
+                 100: '#F1F5F9',
+                 200: '#E2E8F0',
+                 300: '#CBD5E1',
+                 400: '#94A3B8',
+                 500: '#64748B',
+                 600: '#475569',
+                 700: '#334155',
+                 800: '#1E293B',
+                 900: '#0F172A',
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #F1F5F9; /* slate-100 */
+      }
+      /* Animations */
+      @keyframes fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .animate-fade-in {
+        animation: fade-in 0.5s ease-in-out;
+      }
+       @keyframes fade-in-up {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-fade-in-up {
+        animation: fade-in-up 0.4s ease-out forwards;
+      }
+      .drag-over-zone {
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.4); /* ring-primary/40 */
+        border-color: rgba(99, 102, 241, 0.6) !important; /* border-primary/60 */
+        background-color: #EEF2FF; /* indigo-50 */
+      }
+    </style>
+    <!-- React Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel for JSX Transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Gemini API -->
+    <script type="module">
+      import { GoogleGenAI } from "https://esm.sh/@google/genai";
+      window.GoogleGenAI = GoogleGenAI; // Make it globally available
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useCallback, useRef, StrictMode } = React;
+      
+      // --- TYPES & ENUMS ---
+      const GameMode = {
+        MENU: 0,
+        DIFFICULTY_SELECTION: 1,
+        PRACTICE: 2,
+        CHALLENGE: 3,
+      };
+      
+      const GenAIType = {
+          OBJECT: 'OBJECT',
+          STRING: 'STRING',
+          ARRAY: 'ARRAY'
+      };
+
+      // --- GEMINI API SERVICE ---
+      const ai = new window.GoogleGenAI({ apiKey: process.env.API_KEY });
+
+      const questionSchema = {
+        type: GenAIType.OBJECT,
+        properties: {
+          answer: { 
+            type: GenAIType.STRING,
+            description: "The complete, correctly spelled English word."
+          },
+          definition: { 
+            type: GenAIType.STRING,
+            description: "A clear, concise definition of the word, suitable for a student."
+          },
+          parts: {
+            type: GenAIType.ARRAY,
+            description: "An array of strings listing the morphemes used to build the word in the correct order.",
+            items: { type: GenAIType.STRING },
+          },
+          bank: {
+            type: GenAIType.ARRAY,
+            description: "An array of 8 morpheme objects. This MUST include all morphemes from the 'parts' array, plus plausible distractors. Each object must have 'morpheme', 'meaning', and 'type' ('prefix', 'root', or 'suffix').",
+            items: {
+              type: GenAIType.OBJECT,
+              properties: {
+                morpheme: { type: GenAIType.STRING },
+                meaning: { type: GenAIType.STRING, description: "A clear and accurate meaning for the morpheme." },
+                type: { type: GenAIType.STRING, enum: ['prefix', 'root', 'suffix'] },
+              },
+              required: ['morpheme', 'meaning', 'type'],
+            },
+          },
+        },
+        required: ['answer', 'definition', 'parts', 'bank'],
+      };
+
+      const generateQuestion = async (difficulty = 'Medium') => {
+        const difficultyInstructions = {
+            Easy: "The word should be appropriate for a middle school student. Use 2-3 common morphemes. Example: 'rewrite'.",
+            Medium: "The word should be appropriate for an advanced high school student. Use 3-4 morphemes. Example: 'unbelievable'.",
+            Hard: "The word should be complex and suitable for a college student. Use multiple, sometimes less common, morphemes. Example: 'anthropocentric'."
+        };
+
+        const prompt = `You are an expert etymologist and English teacher creating a word-building game. Your task is to generate a single, high-quality quiz question based on the chosen difficulty level.
+
+        Difficulty: ${difficulty}.
+        Instruction: ${difficultyInstructions[difficulty]}
+
+        The question must be an English word constructed from common Greek or Latin morphemes.
+        Do not use obscure words.
+        Ensure every single morpheme in the 'bank' array has an accurate, student-friendly definition, including simple roots like 'believe' or 'act'.
+        Crucially, the definitions of the individual morphemes in the 'parts' array must logically combine to explain the overall 'definition' of the 'answer' word. This is to ensure the puzzle is solvable through etymological reasoning.
+
+        For example, for a MEDIUM word:
+        {
+          "answer": "reaction",
+          "definition": "The act of doing something back in response.",
+          "parts": ["re-", "act", "-ion"],
+          "bank": [
+            {"morpheme": "re-", "meaning": "again, back", "type": "prefix"},
+            {"morpheme": "act", "meaning": "to do", "type": "root"},
+            {"morpheme": "-ion", "meaning": "act or process", "type": "suffix"},
+            {"morpheme": "pre-", "meaning": "before", "type": "prefix"},
+            {"morpheme": "struct", "meaning": "to build", "type": "root"},
+            {"morpheme": "-able", "meaning": "capable of being", "type": "suffix"},
+            {"morpheme": "inter-", "meaning": "between", "type": "prefix"},
+            {"morpheme": "port", "meaning": "to carry", "type": "root"}
+          ]
+        }
+        Now, generate a new, different question with the same structure and quality, adhering to the specified difficulty level.`;
+        
+        try {
+          const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: questionSchema,
+              temperature: 0.9,
+            },
+          });
+
+          const jsonText = response.text;
+           if (typeof jsonText !== 'string' || !jsonText.trim()) {
+            throw new Error("Received empty or invalid JSON string from API.");
+          }
+          const questionData = JSON.parse(jsonText.trim());
+          
+          if (!questionData.answer || !questionData.definition || !questionData.parts || !questionData.bank || questionData.bank.length === 0) {
+              throw new Error("Invalid question format received from API.");
+          }
+          
+          questionData.bank.sort(() => Math.random() - 0.5);
+          return questionData;
+        } catch (error) {
+          console.error("Error generating question from Gemini API:", error);
+          const fallbackBank = [
+            { morpheme: "un-", meaning: "not", type: "prefix" },
+            { morpheme: "believe", meaning: "to accept as true", type: "root" },
+            { morpheme: "-able", meaning: "capable of being", type: "suffix" },
+            { morpheme: "re-", meaning: "again, back", type: "prefix" },
+            { morpheme: "vis", meaning: "to see", type: "root" },
+            { morpheme: "-ion", meaning: "act or process", type: "suffix" },
+            { morpheme: "pre-", meaning: "before", type: "prefix" },
+            { morpheme: "port", meaning: "to carry", type: "root" }
+          ];
+          return {
+            answer: "unbelievable",
+            definition: "Not capable of being believed.",
+            parts: ["un-", "believe", "-able"],
+            bank: fallbackBank.sort(() => Math.random() - 0.5)
+          };
+        }
+      };
+
+      const getHint = async (parts) => {
+          const hintPrompt = `Provide a concise, student-friendly hint by explaining the core meaning of the root morpheme(s) in this list: ${parts.join(', ')}. Focus on the root(s) primarily. For example, for "re-, act, -ion", you could say: "The core of this word is 'act', which means 'to do'."`;
+          try {
+              const response = await ai.models.generateContent({
+                  model: 'gemini-2.5-flash',
+                  contents: hintPrompt,
+              });
+              
+              const text = response.text;
+              if (typeof text === 'string') {
+                return text;
+              }
+
+              console.warn("Could not extract text from Gemini response for hint.");
+              return "Hint not available at the moment.";
+
+          } catch(error) {
+              console.error("Error getting hint from Gemini API:", error);
+              return "The root morphemes are the core building blocks of the word's meaning.";
+          }
+      }
+
+      // --- UI COMPONENTS ---
+
+      const Spinner = ({ className }) => (
+          <svg className={`animate-spin h-6 w-6 text-white ${className}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+      );
+      
+      const CheckIcon = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      );
+
+      const XIcon = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      );
+
+      const MorphemeTile = React.forwardRef(({ morpheme, onDragStart, onDragEnd, onClick, className, showMeanings }, ref) => {
+          const typeStyles = {
+              prefix: 'from-sky-500 to-sky-400',
+              root: 'from-amber-500 to-amber-400',
+              suffix: 'from-fuchsia-500 to-fuchsia-400',
+          };
+
+          return (
+              <div
+                  ref={ref}
+                  id={morpheme.id}
+                  draggable
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                  onClick={onClick}
+                  className={`bg-gradient-to-br text-white p-3 px-4 rounded-xl shadow-md transition-all duration-200 transform hover:scale-105 hover:shadow-lg ${typeStyles[morpheme.type] || 'from-neutral-500 to-neutral-400'} ${className}`}
+              >
+                  <strong className="text-xl font-bold tracking-wide">{morpheme.morpheme}</strong>
+                  {showMeanings && <span className="text-xs italic opacity-90 block font-light tracking-wide mt-0.5">{morpheme.meaning}</span>}
+              </div>
+          );
+      });
+
+      // --- GAME COMPONENTS ---
+
+      const DifficultySelection = ({ onSelectDifficulty, onBack }) => {
+        return (
+          <div className="text-center bg-white p-8 sm:p-12 md:p-16 rounded-3xl shadow-2xl shadow-slate-300/30 w-full max-w-2xl animate-fade-in-up">
+            <h2 className="text-4xl sm:text-5xl font-extrabold text-primary-dark mb-4 tracking-tight">
+              Choose Difficulty
+            </h2>
+            <p className="text-neutral-500 text-lg mb-10">Select a level to begin your practice.</p>
+            <div className="flex flex-col sm:flex-row justify-center gap-5">
+              <button
+                onClick={() => onSelectDifficulty('Easy')}
+                className="group w-full sm:w-auto text-xl font-bold text-white bg-gradient-to-br from-emerald-500 to-teal-400 hover:from-emerald-600 hover:to-teal-500 focus:outline-none focus:ring-4 focus:ring-emerald-200 rounded-2xl px-10 py-5 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
+              >
+                <span className="group-hover:tracking-wider transition-all">Easy</span>
+              </button>
+              <button
+                onClick={() => onSelectDifficulty('Medium')}
+                className="group w-full sm:w-auto text-xl font-bold text-white bg-gradient-to-br from-amber-500 to-orange-400 hover:from-amber-600 hover:to-orange-500 focus:outline-none focus:ring-4 focus:ring-amber-200 rounded-2xl px-10 py-5 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
+              >
+                <span className="group-hover:tracking-wider transition-all">Medium</span>
+              </button>
+              <button
+                onClick={() => onSelectDifficulty('Hard')}
+                className="group w-full sm:w-auto text-xl font-bold text-white bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 focus:outline-none focus:ring-4 focus:ring-rose-200 rounded-2xl px-10 py-5 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
+              >
+                <span className="group-hover:tracking-wider transition-all">Hard</span>
+              </button>
+            </div>
+            <div className="mt-12">
+              <button onClick={onBack} className="text-neutral-600 font-semibold py-3 px-6 hover:bg-neutral-100 rounded-xl transition-colors">Back to Menu</button>
+            </div>
+          </div>
+        );
+      };
+
+      const PracticeMode = ({ onBack, difficulty }) => {
+        const [question, setQuestion] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [droppedMorphemes, setDroppedMorphemes] = useState([]);
+        const [spelledWord, setSpelledWord] = useState('');
+        const [feedback, setFeedback] = useState(null);
+        const [showMeanings, setShowMeanings] = useState(false);
+        
+        const draggedItemNode = useRef(null);
+        const draggedItemData = useRef(null);
+        const dropZoneRef = useRef(null);
+        const fetchInProgress = useRef(false);
+
+        const fetchNewQuestion = useCallback(async () => {
+          if (fetchInProgress.current) return;
+          fetchInProgress.current = true;
+
+          setLoading(true);
+          setFeedback(null);
+          setDroppedMorphemes([]);
+          setSpelledWord('');
+          setQuestion(null); // Clear old question to prevent flash
+          try {
+            const newQuestion = await generateQuestion(difficulty);
+            // Add unique IDs to bank morphemes for stable drag-and-drop
+            newQuestion.bank = newQuestion.bank.map(m => ({ ...m, id: `${m.morpheme}-${Math.random()}` }));
+            setQuestion(newQuestion);
+          } finally {
+            setLoading(false);
+            fetchInProgress.current = false;
+          }
+        }, [difficulty]);
+
+        useEffect(() => {
+          fetchNewQuestion();
+        }, [fetchNewQuestion]);
+        
+        const handleDragStart = (e, morpheme, source) => {
+          draggedItemData.current = { morpheme, source };
+          draggedItemNode.current = e.currentTarget;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('application/json', JSON.stringify(morpheme));
+          setTimeout(() => {
+              if(draggedItemNode.current) draggedItemNode.current.classList.add('opacity-50', 'scale-95');
+          }, 0);
+        };
+
+        const handleDragEnd = () => {
+          if (draggedItemNode.current) {
+            draggedItemNode.current.classList.remove('opacity-50', 'scale-95');
+          }
+          draggedItemNode.current = null;
+          draggedItemData.current = null;
+          Array.from(dropZoneRef.current?.children || []).forEach(child => child.classList.remove('border-l-4', 'border-primary'));
+          if(dropZoneRef.current) dropZoneRef.current.classList.remove('border-r-4', 'border-primary');
+        };
+
+        const handleDragOver = (e) => {
+            e.preventDefault();
+            if (!dropZoneRef.current || !draggedItemData.current) return;
+        
+            const dropZone = dropZoneRef.current;
+            const draggedId = draggedItemData.current.morpheme.id;
+        
+            const activeChildren = Array.from(dropZone.children).filter(child => child.id !== draggedId);
+            activeChildren.forEach(child => child.classList.remove('border-l-4', 'border-primary'));
+            dropZone.classList.remove('border-r-4', 'border-primary');
+            dropZone.classList.add('drag-over-zone');
+
+            const afterElement = activeChildren.find(child => {
+                if (!child || typeof child.getBoundingClientRect !== 'function') return false;
+                const box = child.getBoundingClientRect();
+                return e.clientY < box.top + box.height / 2;
+            });
+        
+            if (afterElement) {
+                afterElement.classList.add('border-l-4', 'border-primary');
+            } else if (activeChildren.length > 0) {
+                dropZone.classList.add('border-r-4', 'border-primary');
+            }
+        };
+        
+        const handleDragLeave = (e) => {
+          e.currentTarget.classList.remove('drag-over-zone', 'border-r-4', 'border-primary');
+        }
+
+        const handleDrop = (e) => {
+          e.preventDefault();
+          e.currentTarget.classList.remove('drag-over-zone', 'border-r-4', 'border-primary');
+          if (!draggedItemData.current) return;
+        
+          const droppedItem = JSON.parse(e.dataTransfer.getData('application/json'));
+        
+          const dropZoneChildren = Array.from(dropZoneRef.current?.children || []);
+          const afterElement = dropZoneChildren.find(child => child.classList.contains('border-l-4'));
+          const dropIndex = afterElement ? droppedMorphemes.findIndex(m => m.id === afterElement.id) : droppedMorphemes.length;
+          
+          dropZoneChildren.forEach(child => child.classList.remove('border-l-4', 'border-primary'));
+
+          setDroppedMorphemes(current => {
+              const newArr = current.filter(m => m.id !== droppedItem.id);
+              newArr.splice(dropIndex, 0, droppedItem);
+              return newArr;
+          });
+        };
+        
+        const handleBankDrop = (e) => {
+           e.preventDefault();
+           if (draggedItemData.current?.source === 'zone') {
+             setDroppedMorphemes(prev => prev.filter(m => m.id !== draggedItemData.current?.morpheme.id));
+           }
+        }
+
+        const handleCheckSpelling = () => {
+          if (!question) return;
+          if (spelledWord.trim().toLowerCase() === question.answer.toLowerCase()) {
+            setFeedback({ message: 'Correct! Well done!', type: 'correct' });
+            setTimeout(() => fetchNewQuestion(), 2000);
+          } else {
+            setFeedback({ message: 'Not quite right. Check your spelling or morpheme order.', type: 'incorrect' });
+          }
+        };
+        
+        const getBankMorphemes = () => {
+            if (!question) return [];
+            const droppedIds = new Set(droppedMorphemes.map(m => m.id));
+            return question.bank.filter(m => !droppedIds.has(m.id));
+        }
+
+        if (loading || !question) {
+          return (
+            <div className="flex flex-col items-center justify-center min-h-[700px] w-full max-w-4xl bg-white p-6 sm:p-8 md:p-10 rounded-2xl shadow-2xl shadow-slate-300/30 text-neutral-600">
+                <Spinner className="text-primary h-12 w-12" />
+                <p className="mt-6 font-semibold text-xl">Generating a new challenge...</p>
+            </div>
+          );
+        }
+
+        return (
+          <div className="bg-white p-6 sm:p-8 md:p-10 rounded-2xl shadow-2xl shadow-slate-300/30 w-full max-w-4xl text-center space-y-8 animate-fade-in-up">
+              <div className="bg-neutral-100 border border-neutral-200/80 p-6 rounded-2xl">
+                  <p className="text-neutral-600 text-lg font-medium">Create a word that means:</p>
+                  <p className="font-bold text-2xl md:text-3xl text-primary-dark mt-2 tracking-tight">{question?.definition}</p>
+              </div>
+
+              <div onDrop={handleBankDrop} onDragOver={e => e.preventDefault()} className="space-y-3">
+                  <div className="flex justify-between items-center px-1">
+                    <h2 className="text-2xl font-bold text-neutral-800">Morpheme Bank</h2>
+                    <button onClick={() => setShowMeanings(!showMeanings)} className="text-sm bg-sky-100 text-sky-800 font-semibold py-2 px-5 rounded-full hover:bg-sky-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-400">{showMeanings ? "Hide" : "Show"} Meanings</button>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-3 p-4 bg-neutral-100 rounded-2xl min-h-[90px] border border-neutral-200/80">
+                      {getBankMorphemes().map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'bank')} onDragEnd={handleDragEnd} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)}
+                  </div>
+              </div>
+
+              <div className="space-y-3">
+                  <h2 className="text-2xl font-bold text-neutral-800">Construction Zone</h2>
+                  <div ref={dropZoneRef} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} className="min-h-[112px] border-2 border-dashed border-neutral-300 rounded-2xl p-4 flex justify-center items-center gap-2 flex-wrap transition-all duration-200">
+                    {droppedMorphemes.length > 0 ? (
+                      droppedMorphemes.map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'zone')} onDragEnd={handleDragEnd} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)
+                    ) : <p className="text-neutral-500 font-medium text-lg">Drag & Drop Morphemes Here</p>}
+                  </div>
+              </div>
+              
+              {droppedMorphemes.length > 0 && (
+                  <div className="flex flex-col sm:flex-row justify-center gap-3 animate-fade-in-up">
+                      <input type="text" value={spelledWord} onChange={e => setSpelledWord(e.target.value)} onKeyUp={e => e.key === 'Enter' && handleCheckSpelling()} placeholder="Now, type the final word..." autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck="false" className="flex-grow p-4 text-lg border-2 border-neutral-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition duration-200 shadow-inner" />
+                      <button onClick={handleCheckSpelling} className="flex items-center justify-center gap-2 bg-gradient-to-br from-indigo-500 to-purple-500 text-white font-bold py-4 px-8 rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5">
+                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                         </svg>
+                         Check
+                      </button>
+                  </div>
+              )}
+
+              {feedback && (
+                <div className={`p-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-3 animate-fade-in ${feedback.type === 'correct' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                   {feedback.type === 'correct' ? <CheckIcon /> : <XIcon />}
+                  {feedback.message}
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row justify-center items-center gap-4 pt-6 border-t border-neutral-200 mt-10">
+                  <button onClick={fetchNewQuestion} disabled={loading} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-neutral-800 text-white font-bold py-3 px-8 rounded-xl hover:bg-neutral-900 transition-colors disabled:bg-neutral-400 shadow-md">
+                      {loading ? <Spinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>}
+                      Next Word
+                  </button>
+                  <button onClick={onBack} className="w-full sm:w-auto text-neutral-600 font-semibold py-3 px-6 hover:bg-neutral-100 rounded-xl transition-colors">Back to Menu</button>
+              </div>
+          </div>
+        );
+      };
+
+      const GAME_DURATION = 180;
+
+      const ChallengeMode = ({ onBack }) => {
+        const [gameState, setGameState] = useState('start');
+        const [question, setQuestion] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [score, setScore] = useState(0);
+        const [timer, setTimer] = useState(GAME_DURATION);
+        const [highScore, setHighScore] = useState(0);
+        const [userAnswer, setUserAnswer] = useState('');
+        const [feedback, setFeedback] = useState(null);
+        const [hint, setHint] = useState('');
+        const [hintUsed, setHintUsed] = useState(false);
+        const answerInputRef = useRef(null);
+        
+        useEffect(() => {
+          setHighScore(parseInt(localStorage.getItem('morphemeHighScore') || '0'));
+        }, []);
+
+        const fetchNewQuestion = useCallback(async () => {
+          setLoading(true);
+          setFeedback(null);
+          setHint('');
+          setUserAnswer('');
+          setHintUsed(false);
+          const newQuestion = await generateQuestion();
+          setQuestion(newQuestion);
+          setLoading(false);
+          answerInputRef.current?.focus();
+        }, []);
+        
+        const endTheGame = useCallback(() => {
+          setGameState('end');
+          const currentHighScore = parseInt(localStorage.getItem('morphemeHighScore') || '0');
+          if (score > currentHighScore) {
+            localStorage.setItem('morphemeHighScore', score.toString());
+            setHighScore(score);
+          }
+        }, [score]);
+
+        useEffect(() => {
+          if (gameState === 'playing') {
+            const interval = setInterval(() => {
+              setTimer(prev => {
+                if (prev <= 1) {
+                  clearInterval(interval);
+                  endTheGame();
+                  return 0;
+                }
+                return prev - 1;
+              });
+            }, 1000);
+            return () => clearInterval(interval);
+          }
+        }, [gameState, endTheGame]);
+
+        const startGame = () => {
+          setScore(0);
+          setTimer(GAME_DURATION);
+          setGameState('playing');
+          fetchNewQuestion();
+        };
+        
+        const handleCheckAnswer = () => {
+          if (!question || !userAnswer.trim()) return;
+
+          if (userAnswer.trim().toLowerCase() === question.answer.toLowerCase()) {
+              const points = hintUsed ? 5 : 10;
+              setScore(prev => prev + points);
+              setFeedback({ message: `Correct! +${points} points`, type: 'correct' });
+              setTimeout(() => fetchNewQuestion(), 1200);
+          } else {
+              setFeedback({ message: 'Not quite. Try again!', type: 'incorrect' });
+          }
+          setUserAnswer('');
+        };
+
+        const handleShowHint = async () => {
+          if (!question || hintUsed) return;
+          setHintUsed(true);
+          setHint('Generating hint...');
+          const hintText = await getHint(question.parts.filter(p => !p.startsWith('-') && !p.endsWith('-')));
+          setHint(`${hintText}`);
+        };
+
+        const formatTime = (seconds) => {
+          const minutes = Math.floor(seconds / 60);
+          const remainingSeconds = seconds % 60;
+          return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        };
+
+        if (gameState === 'end') {
+          return (
+              <div className="bg-white p-8 rounded-2xl shadow-2xl shadow-slate-300/30 w-full max-w-lg text-center space-y-5 animate-fade-in-up">
+                  <h2 className="text-4xl font-bold text-primary-dark">Time's Up!</h2>
+                  <p className="text-neutral-500 text-lg">Your final score is:</p>
+                  <div className="text-7xl font-extrabold text-neutral-800 bg-neutral-100 py-6 rounded-2xl">{score}</div>
+                  {score > highScore && score > 0 && <p className="text-2xl font-semibold text-accent-emerald animate-pulse">🎉 New High Score! 🎉</p>}
+                  <div className="pt-2 space-y-3">
+                    <button onClick={startGame} className="w-full text-lg font-bold text-white bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 rounded-xl px-8 py-4 transition-all transform hover:scale-105 shadow-lg">Play Again</button>
+                    <button onClick={onBack} className="w-full text-neutral-600 font-semibold py-3 px-6 hover:bg-neutral-100 rounded-xl transition-colors">Back to Menu</button>
+                  </div>
+              </div>
+          );
+        }
+
+        if (gameState === 'start') {
+          return (
+              <div className="bg-white p-8 rounded-2xl shadow-2xl shadow-slate-300/30 w-full max-w-lg text-center space-y-6 animate-fade-in-up">
+                  <h1 className="text-5xl font-extrabold text-primary-dark tracking-tight">Challenge Mode</h1>
+                  <p className="text-neutral-500 text-lg leading-relaxed">You have <strong>3 minutes</strong> to answer as many questions as you can. Use hints wisely!</p>
+                  <div className="text-3xl font-bold text-neutral-700 bg-neutral-100 p-5 rounded-2xl border">High Score: <span className="text-primary-dark">{highScore}</span></div>
+                  <div className="pt-2 space-y-3">
+                    <button onClick={startGame} className="w-full text-xl font-bold text-white bg-gradient-to-br from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 rounded-xl px-8 py-4 transition-all transform hover:scale-105 shadow-lg">Start Challenge!</button>
+                    <button onClick={onBack} className="w-full text-neutral-600 font-semibold py-3 px-6 hover:bg-neutral-100 rounded-xl transition-colors">Back to Menu</button>
+                  </div>
+              </div>
+          );
+        }
+
+        return (
+          <div className="bg-white p-6 md:p-8 rounded-2xl shadow-2xl shadow-slate-300/30 w-full max-w-2xl text-center space-y-6">
+              <div className="grid grid-cols-2 gap-4 text-lg font-semibold">
+                  <div className="bg-neutral-100 p-4 rounded-xl text-neutral-700">Time: <span className={`font-bold text-xl ${timer < 20 ? 'text-accent-rose animate-pulse' : 'text-neutral-800'}`}>{formatTime(timer)}</span></div>
+                  <div className="bg-neutral-100 p-4 rounded-xl text-neutral-700">Score: <span className="font-bold text-xl text-primary-dark">{score}</span></div>
+              </div>
+
+              <div className="min-h-[150px] flex flex-col items-center justify-center p-4 bg-neutral-50 border border-neutral-200/80 rounded-2xl">
+                  {loading ? <Spinner className="text-primary" /> : (
+                      <>
+                          <p className="text-neutral-600 font-medium"><strong>Type the word that means:</strong></p>
+                          <p className="font-bold italic text-xl md:text-2xl text-primary-dark mt-2">"{question?.definition}"</p>
+                      </>
+                  )}
+              </div>
+
+              <div className="flex gap-3">
+                  <input ref={answerInputRef} type="text" value={userAnswer} onChange={e => setUserAnswer(e.target.value)} onKeyUp={e => e.key === 'Enter' && handleCheckAnswer()} disabled={loading} placeholder="Type your answer..." autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck="false" className="flex-grow p-4 text-lg border-2 border-neutral-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition duration-200 disabled:bg-neutral-100 shadow-inner" />
+                  <button onClick={handleCheckAnswer} disabled={loading} className="bg-gradient-to-br from-indigo-500 to-purple-500 text-white font-bold py-3 px-6 rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 disabled:from-neutral-400 disabled:to-neutral-300 disabled:shadow-none disabled:transform-none">Check</button>
+              </div>
+
+              <div className="min-h-[52px] text-left p-4 bg-neutral-100 rounded-xl text-neutral-700 border border-neutral-200/80">
+                  {feedback && <p className={`font-semibold flex items-center gap-2 ${feedback.type === 'correct' ? 'text-accent-emerald' : 'text-accent-rose'}`}>{feedback.type === 'correct' ? <CheckIcon/> : <XIcon/>} {feedback.message}</p>}
+                  {hint && <p className="font-medium text-accent-sky">{hint}</p>}
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-center gap-4">
+                  <button onClick={handleShowHint} disabled={hintUsed || loading} className="w-full sm:w-auto bg-amber-500 text-white font-semibold py-2 px-5 rounded-lg hover:bg-amber-600 transition-colors disabled:bg-amber-300 disabled:cursor-not-allowed shadow-md hover:shadow-lg">
+                    Hint (-5 pts)
+                  </button>
+                  <button onClick={() => { setScore(s => Math.max(0, s-2)); fetchNewQuestion();}} disabled={loading} className="w-full sm:w-auto bg-rose-500 text-white font-semibold py-2 px-5 rounded-lg hover:bg-rose-600 transition-colors disabled:bg-rose-300 shadow-md hover:shadow-lg">
+                    Skip (-2 pts)
+                  </button>
+              </div>
+              
+              <div className="pt-4 border-t border-neutral-200">
+                <button onClick={onBack} className="text-neutral-500 font-semibold py-2 px-4 hover:bg-neutral-100 rounded-lg transition-colors text-sm">Back to Menu</button>
+              </div>
+          </div>
+        );
+      };
+
+      const App = () => {
+        const [gameMode, setGameMode] = useState(GameMode.MENU);
+        const [selectedDifficulty, setSelectedDifficulty] = useState('Medium');
+
+        const handleSelectDifficulty = (difficulty) => {
+          setSelectedDifficulty(difficulty);
+          setGameMode(GameMode.PRACTICE);
+        };
+
+        const renderContent = () => {
+          switch (gameMode) {
+            case GameMode.PRACTICE:
+              return <PracticeMode onBack={() => setGameMode(GameMode.MENU)} difficulty={selectedDifficulty} />;
+            case GameMode.DIFFICULTY_SELECTION:
+              return <DifficultySelection onSelectDifficulty={handleSelectDifficulty} onBack={() => setGameMode(GameMode.MENU)} />;
+            case GameMode.CHALLENGE:
+              return <ChallengeMode onBack={() => setGameMode(GameMode.MENU)} />;
+            case GameMode.MENU:
+            default:
+              return (
+                <div className="text-center bg-white p-8 sm:p-12 md:p-16 rounded-3xl shadow-2xl shadow-slate-300/30 w-full max-w-3xl transform transition-all duration-500 animate-fade-in">
+                  <h1 className="text-4xl sm:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-4 tracking-tighter">
+                    Multi-Morpheme Power Writers ⚡️
+                  </h1>
+                  <p className="text-neutral-500 text-xl mb-12">
+                    Build your vocabulary by mastering its building blocks.
+                  </p>
+                  <div className="flex flex-col sm:flex-row justify-center gap-6">
+                    <button
+                      onClick={() => setGameMode(GameMode.DIFFICULTY_SELECTION)}
+                      className="group w-full sm:w-auto text-xl font-bold text-white bg-gradient-to-br from-sky-500 to-cyan-400 hover:from-sky-600 hover:to-cyan-500 focus:outline-none focus:ring-4 focus:ring-sky-200 rounded-2xl px-10 py-5 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-2xl"
+                    >
+                      <span className="group-hover:tracking-wider transition-all">Practice Mode</span>
+                    </button>
+                    <button
+                      onClick={() => setGameMode(GameMode.CHALLENGE)}
+                      className="group w-full sm:w-auto text-xl font-bold text-white bg-gradient-to-br from-emerald-500 to-teal-400 hover:from-emerald-600 hover:to-teal-500 focus:outline-none focus:ring-4 focus:ring-emerald-200 rounded-2xl px-10 py-5 transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-2xl"
+                    >
+                       <span className="group-hover:tracking-wider transition-all">Challenge Mode</span>
+                    </button>
+                  </div>
+                </div>
+              );
+          }
+        };
+
+        return (
+          <main className="flex flex-col items-center justify-center min-h-screen font-sans p-4">
+            {renderContent()}
+          </main>
+        );
+      };
+
+      // --- RENDER APP ---
+      const container = document.getElementById('root');
+      if (container) {
+          const root = ReactDOM.createRoot(container);
+          root.render(
+            <StrictMode>
+              <App />
+            </StrictMode>
+          );
+      } else {
+          console.error("Root element not found");
+      }
+
+    </script>
+  </body>
+</html>
