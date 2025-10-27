@@ -102,7 +102,7 @@ const ChallengeMode = ({ onBack }: ChallengeModeProps) => {
     if (!question || !userAnswer.trim()) return;
 
     if (userAnswer.trim().toLowerCase() === question.answer.toLowerCase()) {
-        const points = hintUsed ? 5 : 10;
+        const points = 10;
         setScore(prev => prev + points);
         setFeedback({ message: `Correct! +${points} points`, type: 'correct' });
         setTimeout(() => fetchNewQuestion(), 1200);
@@ -113,11 +113,23 @@ const ChallengeMode = ({ onBack }: ChallengeModeProps) => {
   };
 
   const handleShowHint = async () => {
-    if (!question || hintUsed) return;
+    if (!question || hintUsed || loading) return;
     setHintUsed(true);
+    setScore(prev => Math.max(0, prev - 2));
     setHint('Generating hint...');
     const hintText = await getHint(question.parts.filter(p => !p.startsWith('-') && !p.endsWith('-')));
     setHint(`${hintText}`);
+  };
+
+  const handleSkipQuestion = () => {
+    if (loading || !question) return;
+    
+    setScore(s => Math.max(0, s - 5));
+    setFeedback({ message: `The answer was: ${question.answer}`, type: 'incorrect' });
+
+    setTimeout(() => {
+        fetchNewQuestion();
+    }, 2500);
   };
 
   const formatTime = (seconds: number) => {
@@ -183,10 +195,10 @@ const ChallengeMode = ({ onBack }: ChallengeModeProps) => {
 
         <div className="flex flex-col sm:flex-row justify-center gap-4">
             <button onClick={handleShowHint} disabled={hintUsed || loading} className="w-full sm:w-auto bg-amber-500 text-white font-semibold py-2 px-5 rounded-lg hover:bg-amber-600 transition-colors disabled:bg-amber-300 disabled:cursor-not-allowed shadow-md hover:shadow-lg">
-              Hint (-5 pts)
+              Hint (-2 pts)
             </button>
-            <button onClick={() => { setScore(s => Math.max(0, s-2)); fetchNewQuestion();}} disabled={loading} className="w-full sm:w-auto bg-rose-500 text-white font-semibold py-2 px-5 rounded-lg hover:bg-rose-600 transition-colors disabled:bg-rose-300 shadow-md hover:shadow-lg">
-              Skip (-2 pts)
+            <button onClick={handleSkipQuestion} disabled={loading} className="w-full sm:w-auto bg-rose-500 text-white font-semibold py-2 px-5 rounded-lg hover:bg-rose-600 transition-colors disabled:bg-rose-300 shadow-md hover:shadow-lg">
+              Skip (-5 pts)
             </button>
         </div>
         
