@@ -270,6 +270,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
 
       document.body.removeChild(ghostElement);
       originalElement.style.opacity = '1';
+      document.body.style.touchAction = '';
 
       const touch = e.changedTouches[0];
       const clientX = touch.clientX;
@@ -283,11 +284,11 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
               const box = child.getBoundingClientRect();
               return clientY < box.top + box.height / 2;
           });
-          const dropIndex = afterElement
-              ? droppedMorphemes.findIndex(m => m.id === afterElement.id)
-              : droppedMorphemes.length;
           
           setDroppedMorphemes(current => {
+              const dropIndex = afterElement
+                  ? current.findIndex(m => m.id === afterElement.id)
+                  : current.length;
               const newArr = current.filter(m => m.id !== morpheme.id);
               newArr.splice(dropIndex, 0, morpheme);
               return newArr;
@@ -306,7 +307,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
       touchDragData.current = null;
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleTouchEnd);
-  }, [droppedMorphemes, handleTouchMove]);
+  }, [handleTouchMove]);
 
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme, source: 'bank' | 'zone') => {
@@ -329,6 +330,8 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
       document.body.appendChild(ghostElement);
 
       originalElement.style.opacity = '0.4';
+
+      document.body.style.touchAction = 'none';
 
       touchDragData.current = { morpheme, source, originalElement, ghostElement, offsetX, offsetY };
 
