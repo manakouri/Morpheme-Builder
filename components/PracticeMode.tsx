@@ -27,12 +27,13 @@ interface MorphemeTileProps {
     morpheme: Morpheme;
     onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
     onDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
+    onTouchStart: (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme) => void;
     onClick?: () => void;
     className?: string;
     showMeanings: boolean;
 }
 
-const MorphemeTile = forwardRef<HTMLDivElement, MorphemeTileProps>(({ morpheme, onDragStart, onDragEnd, onClick, className, showMeanings }, ref) => {
+const MorphemeTile = forwardRef<HTMLDivElement, MorphemeTileProps>(({ morpheme, onDragStart, onDragEnd, onTouchStart, onClick, className, showMeanings }, ref) => {
     const typeStyles = {
         prefix: 'from-sky-500 to-sky-400',
         root: 'from-amber-500 to-amber-400',
@@ -46,8 +47,9 @@ const MorphemeTile = forwardRef<HTMLDivElement, MorphemeTileProps>(({ morpheme, 
             draggable
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
+            onTouchStart={(e) => onTouchStart(e, morpheme)}
             onClick={onClick}
-            className={`bg-gradient-to-br text-white p-3 px-4 rounded-xl shadow-md transition-all duration-200 transform hover:scale-105 hover:shadow-lg ${typeStyles[morpheme.type] || 'from-neutral-500 to-neutral-400'} ${className}`}
+            className={`select-none bg-gradient-to-br text-white p-3 px-4 rounded-xl shadow-md transition-all duration-200 transform hover:scale-105 hover:shadow-lg ${typeStyles[morpheme.type] || 'from-neutral-500 to-neutral-400'} ${className}`}
         >
             <strong className="text-xl font-bold tracking-wide">{morpheme.morpheme}</strong>
             {showMeanings && <span className="text-xs italic opacity-90 block font-light tracking-wide mt-0.5">{morpheme.meaning}</span>}
@@ -74,8 +76,19 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
   const draggedItemNode = useRef<HTMLElement | null>(null);
   const draggedItemData = useRef<{ morpheme: Morpheme; source: 'bank' | 'zone' } | null>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const bankRef = useRef<HTMLDivElement>(null);
   const fetchInProgress = useRef(false);
   const questionAnswerRef = useRef<string | null>(null);
+
+  const touchDragData = useRef<{
+    morpheme: Morpheme;
+    source: 'bank' | 'zone';
+    originalElement: HTMLElement;
+    ghostElement: HTMLElement;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+
 
   useEffect(() => {
     questionAnswerRef.current = question?.answer ?? null;
@@ -135,7 +148,6 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
     }
     draggedItemNode.current = null;
     draggedItemData.current = null;
-    // FIX: Ensure child is an HTMLElement before accessing classList to avoid type errors.
     Array.from(dropZoneRef.current?.children || []).forEach(child => {
         if (child instanceof HTMLElement) {
             child.classList.remove('border-l-4', 'border-primary');
@@ -151,7 +163,6 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
       const dropZone = dropZoneRef.current;
       const draggedId = draggedItemData.current.morpheme.id;
   
-      // FIX: Use a type guard to ensure children are HTMLElements for safe property access.
       const activeChildren = Array.from(dropZone.children).filter(
         (child): child is HTMLElement => child instanceof HTMLElement && child.id !== draggedId
       );
@@ -159,7 +170,6 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
       dropZone.classList.remove('border-r-4', 'border-primary');
       dropZone.classList.add('drag-over-zone');
 
-      // FIX: With activeChildren correctly typed, the find operation is simpler and safer.
       const afterElement = activeChildren.find(child => {
           const box = child.getBoundingClientRect();
           return e.clientY < box.top + box.height / 2;
@@ -184,14 +194,11 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
     const droppedItem = JSON.parse(e.dataTransfer.getData('application/json')) as Morpheme;
   
     const dropZoneChildren = Array.from(dropZoneRef.current?.children || []);
-    // FIX: Use a type guard to ensure child is an HTMLElement before accessing classList.
     const afterElement = dropZoneChildren.find((child): child is HTMLElement =>
         child instanceof HTMLElement && child.classList.contains('border-l-4')
     );
-    // FIX: afterElement is now correctly typed as HTMLElement | undefined, so id access is safe.
     const dropIndex = afterElement ? droppedMorphemes.findIndex(m => m.id === afterElement.id) : droppedMorphemes.length;
     
-    // FIX: Ensure child is an HTMLElement before accessing classList to avoid type errors.
     dropZoneChildren.forEach(child => {
         if (child instanceof HTMLElement) {
             child.classList.remove('border-l-4', 'border-primary');
@@ -212,6 +219,123 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
      }
   }
 
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (!touchDragData.current) return;
+    e.preventDefault(); 
+
+    const { ghostElement, offsetX, offsetY, morpheme } = touchDragData.current;
+    const touch = e.touches[0];
+    const clientX = touch.clientX;
+    const clientY = touch.clientY;
+    
+    ghostElement.style.left = `${clientX - offsetX}px`;
+    ghostElement.style.top = `${clientY - offsetY}px`;
+
+    ghostElement.style.display = 'none';
+    const elementBelow = document.elementFromPoint(clientX, clientY);
+    ghostElement.style.display = '';
+
+    if (!dropZoneRef.current) return;
+    const dropZone = dropZoneRef.current;
+
+    Array.from(dropZone.children).forEach(child => {
+        if (child instanceof HTMLElement) child.classList.remove('border-l-4', 'border-primary');
+    });
+    dropZone.classList.remove('border-r-4', 'border-primary', 'drag-over-zone');
+
+    if (elementBelow && dropZone.contains(elementBelow)) {
+        dropZone.classList.add('drag-over-zone');
+
+        const activeChildren = Array.from(dropZone.children).filter(
+            (child): child is HTMLElement => child instanceof HTMLElement && child.id !== morpheme.id
+        );
+
+        const afterElement = activeChildren.find(child => {
+            const box = child.getBoundingClientRect();
+            return clientY < box.top + box.height / 2;
+        });
+
+        if (afterElement) {
+            afterElement.classList.add('border-l-4', 'border-primary');
+        } else if (activeChildren.length > 0) {
+            dropZone.classList.add('border-r-4', 'border-primary');
+        }
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((e: TouchEvent) => {
+      if (!touchDragData.current) return;
+      
+      const { ghostElement, originalElement, morpheme, source } = touchDragData.current;
+
+      document.body.removeChild(ghostElement);
+      originalElement.style.opacity = '1';
+
+      const touch = e.changedTouches[0];
+      const clientX = touch.clientX;
+      const clientY = touch.clientY;
+      const elementBelow = document.elementFromPoint(clientX, clientY);
+
+      if (dropZoneRef.current && elementBelow && dropZoneRef.current.contains(elementBelow)) {
+          const dropZoneChildren = Array.from(dropZoneRef.current.children);
+          const afterElement = dropZoneChildren.find((child): child is HTMLElement => {
+              if (!(child instanceof HTMLElement)) return false;
+              const box = child.getBoundingClientRect();
+              return clientY < box.top + box.height / 2;
+          });
+          const dropIndex = afterElement
+              ? droppedMorphemes.findIndex(m => m.id === afterElement.id)
+              : droppedMorphemes.length;
+          
+          setDroppedMorphemes(current => {
+              const newArr = current.filter(m => m.id !== morpheme.id);
+              newArr.splice(dropIndex, 0, morpheme);
+              return newArr;
+          });
+      } else if (source === 'zone') {
+          setDroppedMorphemes(prev => prev.filter(m => m.id !== morpheme.id));
+      }
+
+      if (dropZoneRef.current) {
+          Array.from(dropZoneRef.current.children).forEach(child => {
+              if (child instanceof HTMLElement) child.classList.remove('border-l-4', 'border-primary');
+          });
+          dropZoneRef.current.classList.remove('border-r-4', 'border-primary', 'drag-over-zone');
+      }
+
+      touchDragData.current = null;
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+  }, [droppedMorphemes, handleTouchMove]);
+
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme, source: 'bank' | 'zone') => {
+      const originalElement = e.currentTarget;
+      const touch = e.touches[0];
+      const rect = originalElement.getBoundingClientRect();
+      const offsetX = touch.clientX - rect.left;
+      const offsetY = touch.clientY - rect.top;
+
+      const ghostElement = originalElement.cloneNode(true) as HTMLElement;
+      ghostElement.style.position = 'fixed';
+      ghostElement.style.left = `${touch.clientX - offsetX}px`;
+      ghostElement.style.top = `${touch.clientY - offsetY}px`;
+      ghostElement.style.width = `${rect.width}px`;
+      ghostElement.style.height = `${rect.height}px`;
+      ghostElement.style.pointerEvents = 'none';
+      ghostElement.style.zIndex = '1000';
+      ghostElement.style.opacity = '0.8';
+      ghostElement.style.transform = 'scale(1.05)';
+      document.body.appendChild(ghostElement);
+
+      originalElement.style.opacity = '0.4';
+
+      touchDragData.current = { morpheme, source, originalElement, ghostElement, offsetX, offsetY };
+
+      window.addEventListener('touchmove', handleTouchMove, { passive: false });
+      window.addEventListener('touchend', handleTouchEnd);
+  };
+
   const handleCheckSpelling = () => {
     if (!question) return;
     if (spelledWord.trim().toLowerCase() === question.answer.toLowerCase()) {
@@ -224,11 +348,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
   
   const handleSkipQuestion = () => {
     if (loading || !question) return;
-    
-    // Show the answer
     setFeedback({ message: `The answer was: ${question.answer}`, type: 'incorrect' });
-
-    // Wait for a moment, then fetch the next question
     setTimeout(() => {
         fetchNewQuestion();
     }, 2500);
@@ -256,13 +376,13 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
             <p className="font-bold text-2xl md:text-3xl text-primary-dark mt-2 tracking-tight">{question?.definition}</p>
         </div>
 
-        <div onDrop={handleBankDrop} onDragOver={e => e.preventDefault()} className="space-y-3">
+        <div ref={bankRef} onDrop={handleBankDrop} onDragOver={e => e.preventDefault()} className="space-y-3">
             <div className="flex justify-between items-center px-1">
               <h2 className="text-2xl font-bold text-neutral-800">Morpheme Bank</h2>
               <button onClick={() => setShowMeanings(!showMeanings)} className="text-sm bg-sky-100 text-sky-800 font-semibold py-2 px-5 rounded-full hover:bg-sky-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-400">{showMeanings ? "Hide" : "Show"} Meanings</button>
             </div>
             <div className="flex flex-wrap justify-center gap-3 p-4 bg-neutral-100 rounded-2xl min-h-[90px] border border-neutral-200/80">
-                {getBankMorphemes().map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'bank')} onDragEnd={handleDragEnd} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)}
+                {getBankMorphemes().map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'bank')} onDragEnd={handleDragEnd} onTouchStart={(e) => handleTouchStart(e, m, 'bank')} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)}
             </div>
         </div>
 
@@ -276,7 +396,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
             )}
             <div ref={dropZoneRef} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} className={`min-h-[112px] border-2 border-dashed rounded-2xl p-4 flex justify-center items-center gap-2 flex-wrap transition-all duration-200 ${morphemesAreCorrect ? 'border-emerald-500 bg-emerald-50/80 shadow-inner' : 'border-neutral-300'}`}>
               {droppedMorphemes.length > 0 ? (
-                droppedMorphemes.map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'zone')} onDragEnd={handleDragEnd} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)
+                droppedMorphemes.map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'zone')} onDragEnd={handleDragEnd} onTouchStart={(e) => handleTouchStart(e, m, 'zone')} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)
               ) : <p className="text-neutral-500 font-medium text-lg">Drag & Drop Morphemes Here</p>}
             </div>
         </div>
