@@ -44,10 +44,15 @@ const ChallengeMode = ({ onBack }: ChallengeModeProps) => {
   const [hint, setHint] = useState('');
   const [hintUsed, setHintUsed] = useState(false);
   const answerInputRef = useRef<HTMLInputElement>(null);
+  const questionAnswerRef = useRef<string | null>(null);
   
   useEffect(() => {
     setHighScore(parseInt(localStorage.getItem('morphemeHighScore') || '0'));
   }, []);
+
+  useEffect(() => {
+    questionAnswerRef.current = question?.answer ?? null;
+  }, [question]);
 
   const fetchNewQuestion = useCallback(async () => {
     setLoading(true);
@@ -55,7 +60,7 @@ const ChallengeMode = ({ onBack }: ChallengeModeProps) => {
     setHint('');
     setUserAnswer('');
     setHintUsed(false);
-    const newQuestion = await generateQuestion();
+    const newQuestion = await generateQuestion('Medium', questionAnswerRef.current ?? undefined);
     setQuestion(newQuestion);
     setLoading(false);
     answerInputRef.current?.focus();

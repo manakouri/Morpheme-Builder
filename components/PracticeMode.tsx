@@ -69,11 +69,17 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
   const [spelledWord, setSpelledWord] = useState('');
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [showMeanings, setShowMeanings] = useState(false);
+  const [morphemesAreCorrect, setMorphemesAreCorrect] = useState(false);
   
   const draggedItemNode = useRef<HTMLElement | null>(null);
   const draggedItemData = useRef<{ morpheme: Morpheme; source: 'bank' | 'zone' } | null>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const fetchInProgress = useRef(false);
+  const questionAnswerRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    questionAnswerRef.current = question?.answer ?? null;
+  }, [question]);
 
   const fetchNewQuestion = useCallback(async () => {
     if (fetchInProgress.current) return;
@@ -83,9 +89,10 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
     setFeedback(null);
     setDroppedMorphemes([]);
     setSpelledWord('');
+    setMorphemesAreCorrect(false);
     setQuestion(null); // Clear old question to prevent flash
     try {
-      const newQuestion = await generateQuestion(difficulty);
+      const newQuestion = await generateQuestion(difficulty, questionAnswerRef.current ?? undefined);
       // Add unique IDs to bank morphemes for stable drag-and-drop
       newQuestion.bank = newQuestion.bank.map(m => ({ ...m, id: `${m.morpheme}-${Math.random()}` }));
       setQuestion(newQuestion);
@@ -99,6 +106,19 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
     fetchNewQuestion();
   }, [fetchNewQuestion]);
   
+  useEffect(() => {
+    if (!question) {
+      setMorphemesAreCorrect(false);
+      return;
+    }
+    const droppedMorphemeStrings = droppedMorphemes.map(m => m.morpheme);
+    const correctMorphemeStrings = question.parts;
+    const isCorrect = droppedMorphemeStrings.length === correctMorphemeStrings.length &&
+      droppedMorphemeStrings.every((val, index) => val === correctMorphemeStrings[index]);
+    
+    setMorphemesAreCorrect(isCorrect);
+  }, [droppedMorphemes, question]);
+
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, morpheme: Morpheme, source: 'bank' | 'zone') => {
     draggedItemData.current = { morpheme, source };
     draggedItemNode.current = e.currentTarget;
@@ -202,6 +222,18 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
     }
   };
   
+  const handleSkipQuestion = () => {
+    if (loading || !question) return;
+    
+    // Show the answer
+    setFeedback({ message: `The answer was: ${question.answer}`, type: 'incorrect' });
+
+    // Wait for a moment, then fetch the next question
+    setTimeout(() => {
+        fetchNewQuestion();
+    }, 2500);
+  };
+
   const getBankMorphemes = () => {
       if (!question) return [];
       const droppedIds = new Set(droppedMorphemes.map(m => m.id));
@@ -236,14 +268,20 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
 
         <div className="space-y-3">
             <h2 className="text-2xl font-bold text-neutral-800">Construction Zone</h2>
-            <div ref={dropZoneRef} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} className="min-h-[112px] border-2 border-dashed border-neutral-300 rounded-2xl p-4 flex justify-center items-center gap-2 flex-wrap transition-all duration-200">
+             {morphemesAreCorrect && (
+                <div className="p-3 rounded-xl font-semibold text-md flex items-center justify-center gap-3 animate-fade-in bg-emerald-100 text-emerald-800">
+                    <CheckIcon />
+                    <span>Correct! You've assembled the morphemes in the right order.</span>
+                </div>
+            )}
+            <div ref={dropZoneRef} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} className={`min-h-[112px] border-2 border-dashed rounded-2xl p-4 flex justify-center items-center gap-2 flex-wrap transition-all duration-200 ${morphemesAreCorrect ? 'border-emerald-500 bg-emerald-50/80 shadow-inner' : 'border-neutral-300'}`}>
               {droppedMorphemes.length > 0 ? (
                 droppedMorphemes.map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'zone')} onDragEnd={handleDragEnd} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)
               ) : <p className="text-neutral-500 font-medium text-lg">Drag & Drop Morphemes Here</p>}
             </div>
         </div>
         
-        {droppedMorphemes.length > 0 && (
+        {morphemesAreCorrect && (
             <div className="flex flex-col sm:flex-row justify-center gap-3 animate-fade-in-up">
                 <input type="text" value={spelledWord} onChange={e => setSpelledWord(e.target.value)} onKeyUp={e => e.key === 'Enter' && handleCheckSpelling()} placeholder="Now, type the final word..." autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck="false" className="flex-grow p-4 text-lg border-2 border-neutral-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none transition duration-200 shadow-inner" />
                 <button onClick={handleCheckSpelling} className="flex items-center justify-center gap-2 bg-gradient-to-br from-indigo-500 to-purple-500 text-white font-bold py-4 px-8 rounded-xl hover:from-indigo-600 hover:to-purple-600 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5">
@@ -263,7 +301,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
         )}
 
         <div className="flex flex-col sm:flex-row justify-center items-center gap-4 pt-6 border-t border-neutral-200 mt-10">
-            <button onClick={fetchNewQuestion} disabled={loading} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-neutral-800 text-white font-bold py-3 px-8 rounded-xl hover:bg-neutral-900 transition-colors disabled:bg-neutral-400 shadow-md">
+            <button onClick={handleSkipQuestion} disabled={loading} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-neutral-800 text-white font-bold py-3 px-8 rounded-xl hover:bg-neutral-900 transition-colors disabled:bg-neutral-400 shadow-md">
                 {loading ? <Spinner /> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>}
                 Next Word
             </button>
