@@ -172,7 +172,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
 
       const afterElement = activeChildren.find(child => {
           const box = child.getBoundingClientRect();
-          return e.clientY < box.top + box.height / 2;
+          return e.clientX < box.left + box.width / 2;
       });
   
       if (afterElement) {
@@ -252,7 +252,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
 
         const afterElement = activeChildren.find(child => {
             const box = child.getBoundingClientRect();
-            return clientY < box.top + box.height / 2;
+            return clientX < box.left + box.width / 2;
         });
 
         if (afterElement) {
@@ -264,50 +264,56 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
   }, []);
 
   const handleTouchEnd = useCallback((e: TouchEvent) => {
-      if (!touchDragData.current) return;
-      
-      const { ghostElement, originalElement, morpheme, source } = touchDragData.current;
+    if (!touchDragData.current) return;
+    
+    const { ghostElement, originalElement, morpheme, source } = touchDragData.current;
 
-      document.body.removeChild(ghostElement);
-      originalElement.style.opacity = '1';
-      document.body.style.touchAction = '';
+    // Perform drop logic first
+    if (e.changedTouches.length > 0) {
+        const touch = e.changedTouches[0];
+        const clientX = touch.clientX;
+        const clientY = touch.clientY;
+        const elementBelow = document.elementFromPoint(clientX, clientY);
 
-      const touch = e.changedTouches[0];
-      const clientX = touch.clientX;
-      const clientY = touch.clientY;
-      const elementBelow = document.elementFromPoint(clientX, clientY);
+        if (dropZoneRef.current && elementBelow && dropZoneRef.current.contains(elementBelow)) {
+            const dropZoneChildren = Array.from(dropZoneRef.current.children);
+            const afterElement = dropZoneChildren.find((child): child is HTMLElement => {
+                if (!(child instanceof HTMLElement)) return false;
+                const box = child.getBoundingClientRect();
+                return clientX < box.left + box.width / 2;
+            });
+            
+            setDroppedMorphemes(current => {
+                const dropIndex = afterElement
+                    ? current.findIndex(m => m.id === afterElement.id)
+                    : current.length;
+                const newArr = current.filter(m => m.id !== morpheme.id);
+                newArr.splice(dropIndex, 0, morpheme);
+                return newArr;
+            });
+        } else if (source === 'zone') {
+            setDroppedMorphemes(prev => prev.filter(m => m.id !== morpheme.id));
+        }
+    }
 
-      if (dropZoneRef.current && elementBelow && dropZoneRef.current.contains(elementBelow)) {
-          const dropZoneChildren = Array.from(dropZoneRef.current.children);
-          const afterElement = dropZoneChildren.find((child): child is HTMLElement => {
-              if (!(child instanceof HTMLElement)) return false;
-              const box = child.getBoundingClientRect();
-              return clientY < box.top + box.height / 2;
-          });
-          
-          setDroppedMorphemes(current => {
-              const dropIndex = afterElement
-                  ? current.findIndex(m => m.id === afterElement.id)
-                  : current.length;
-              const newArr = current.filter(m => m.id !== morpheme.id);
-              newArr.splice(dropIndex, 0, morpheme);
-              return newArr;
-          });
-      } else if (source === 'zone') {
-          setDroppedMorphemes(prev => prev.filter(m => m.id !== morpheme.id));
-      }
+    // --- Cleanup ---
+    if (ghostElement.parentElement) {
+        document.body.removeChild(ghostElement);
+    }
+    originalElement.style.opacity = '1';
+    document.body.style.touchAction = '';
 
-      if (dropZoneRef.current) {
-          Array.from(dropZoneRef.current.children).forEach(child => {
-              if (child instanceof HTMLElement) child.classList.remove('border-l-4', 'border-primary');
-          });
-          dropZoneRef.current.classList.remove('border-r-4', 'border-primary', 'drag-over-zone');
-      }
+    if (dropZoneRef.current) {
+        Array.from(dropZoneRef.current.children).forEach(child => {
+            if (child instanceof HTMLElement) child.classList.remove('border-l-4', 'border-primary');
+        });
+        dropZoneRef.current.classList.remove('border-r-4', 'border-primary', 'drag-over-zone');
+    }
 
-      touchDragData.current = null;
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-  }, [handleTouchMove]);
+    touchDragData.current = null;
+    window.removeEventListener('touchmove', handleTouchMove);
+    window.removeEventListener('touchend', handleTouchEnd);
+}, [handleTouchMove]);
 
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme, source: 'bank' | 'zone') => {
