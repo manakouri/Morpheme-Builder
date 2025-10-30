@@ -25,9 +25,9 @@ const XIcon = () => (
 
 interface MorphemeTileProps {
     morpheme: Morpheme;
-    onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
-    onDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
-    onTouchStart: (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme) => void;
+    onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
+    onDragEnd?: (e: React.DragEvent<HTMLDivElement>) => void;
+    onTouchStart?: (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme) => void;
     onClick?: () => void;
     className?: string;
     showMeanings: boolean;
@@ -44,10 +44,10 @@ const MorphemeTile = forwardRef<HTMLDivElement, MorphemeTileProps>(({ morpheme, 
         <div
             ref={ref}
             id={morpheme.id}
-            draggable
+            draggable={!!onDragStart}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
-            onTouchStart={(e) => onTouchStart(e, morpheme)}
+            onTouchStart={onTouchStart ? (e) => onTouchStart(e, morpheme) : undefined}
             onClick={onClick}
             className={`select-none bg-gradient-to-br text-white p-3 px-4 rounded-xl shadow-md transition-all duration-200 transform hover:scale-105 hover:shadow-lg ${typeStyles[morpheme.type] || 'from-neutral-500 to-neutral-400'} ${className}`}
         >
@@ -132,7 +132,15 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
     setMorphemesAreCorrect(isCorrect);
   }, [droppedMorphemes, question]);
 
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, morpheme: Morpheme, source: 'bank' | 'zone') => {
+  const handleBankMorphemeClick = (morpheme: Morpheme) => {
+      setDroppedMorphemes(current => [...current, morpheme]);
+  };
+
+  const handleZoneMorphemeClick = (morpheme: Morpheme) => {
+      setDroppedMorphemes(current => current.filter(m => m.id !== morpheme.id));
+  };
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, morpheme: Morpheme, source: 'zone') => {
     draggedItemData.current = { morpheme, source };
     draggedItemNode.current = e.currentTarget;
     e.dataTransfer.effectAllowed = 'move';
@@ -211,13 +219,6 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
         return newArr;
     });
   };
-  
-  const handleBankDrop = (e: React.DragEvent<HTMLDivElement>) => {
-     e.preventDefault();
-     if (draggedItemData.current?.source === 'zone') {
-       setDroppedMorphemes(prev => prev.filter(m => m.id !== draggedItemData.current?.morpheme.id));
-     }
-  }
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (!touchDragData.current) return;
@@ -266,7 +267,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
   const handleTouchEnd = useCallback((e: TouchEvent) => {
     if (!touchDragData.current) return;
     
-    const { ghostElement, originalElement, morpheme, source } = touchDragData.current;
+    const { ghostElement, originalElement, morpheme } = touchDragData.current;
 
     // Perform drop logic first
     if (e.changedTouches.length > 0) {
@@ -291,8 +292,6 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
                 newArr.splice(dropIndex, 0, morpheme);
                 return newArr;
             });
-        } else if (source === 'zone') {
-            setDroppedMorphemes(prev => prev.filter(m => m.id !== morpheme.id));
         }
     }
 
@@ -316,7 +315,7 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
 }, [handleTouchMove]);
 
 
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme, source: 'bank' | 'zone') => {
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>, morpheme: Morpheme, source: 'zone') => {
       const originalElement = e.currentTarget;
       const touch = e.touches[0];
       const rect = originalElement.getBoundingClientRect();
@@ -385,13 +384,13 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
             <p className="font-bold text-2xl md:text-3xl text-primary-dark mt-2 tracking-tight">{question?.definition}</p>
         </div>
 
-        <div ref={bankRef} onDrop={handleBankDrop} onDragOver={e => e.preventDefault()} className="space-y-3">
+        <div ref={bankRef} className="space-y-3">
             <div className="flex justify-between items-center px-1">
               <h2 className="text-2xl font-bold text-neutral-800">Morpheme Bank</h2>
               <button onClick={() => setShowMeanings(!showMeanings)} className="text-sm bg-sky-100 text-sky-800 font-semibold py-2 px-5 rounded-full hover:bg-sky-200 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-400">{showMeanings ? "Hide" : "Show"} Meanings</button>
             </div>
             <div className="flex flex-wrap justify-center gap-3 p-4 bg-neutral-100 rounded-2xl min-h-[90px] border border-neutral-200/80">
-                {getBankMorphemes().map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'bank')} onDragEnd={handleDragEnd} onTouchStart={(e) => handleTouchStart(e, m, 'bank')} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)}
+                {getBankMorphemes().map(m => <MorphemeTile key={m.id} morpheme={m} onClick={() => handleBankMorphemeClick(m)} className="cursor-pointer" showMeanings={showMeanings} />)}
             </div>
         </div>
 
@@ -405,8 +404,8 @@ const PracticeMode = ({ onBack, difficulty }: PracticeModeProps) => {
             )}
             <div ref={dropZoneRef} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} className={`min-h-[112px] border-2 border-dashed rounded-2xl p-4 flex justify-center items-center gap-2 flex-wrap transition-all duration-200 ${morphemesAreCorrect ? 'border-emerald-500 bg-emerald-50/80 shadow-inner' : 'border-neutral-300'}`}>
               {droppedMorphemes.length > 0 ? (
-                droppedMorphemes.map(m => <MorphemeTile key={m.id} morpheme={m} onDragStart={(e) => handleDragStart(e, m, 'zone')} onDragEnd={handleDragEnd} onTouchStart={(e) => handleTouchStart(e, m, 'zone')} className="cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)
-              ) : <p className="text-neutral-500 font-medium text-lg">Drag & Drop Morphemes Here</p>}
+                droppedMorphemes.map(m => <MorphemeTile key={m.id} morpheme={m} onClick={() => handleZoneMorphemeClick(m)} onDragStart={(e) => handleDragStart(e, m, 'zone')} onDragEnd={handleDragEnd} onTouchStart={(e) => handleTouchStart(e, m, 'zone')} className="cursor-pointer lg:cursor-grab active:cursor-grabbing" showMeanings={showMeanings} />)
+              ) : <p className="text-neutral-500 font-medium text-lg">Click morphemes from the bank to add them here</p>}
             </div>
         </div>
         
